@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 Light Sensor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <button class="theme-toggle" id="themeToggle">🌙 Dark mode</button>
+    <h1>Intenzita osvetlenia</h1>
+
+    <div class="tabs">
+        <button class="tab-btn active" id="graphTabBtn">📊 Graf</button>
+        <button class="tab-btn" id="settingsTabBtn">⚙️ Nastavenia ESP32</button>
+        <button class="tab-btn" id="alertsTabBtn">📧 Upozornenia</button>
+    </div>
+
+    <div id="graphTab" class="tab-content active">
+        <h2 id="value">Posledná hodnota lux: 0 lx</h2>
+
+        <div class="mode-switch">
+            <div class="mode-buttons">
+                <button class="mode-btn active" id="realtimeModeBtn">⌚ Realtime mód</button>
+                <button class="mode-btn" id="filterModeBtn">🔍 Filter podľa dátumu</button>
+            </div>
+
+            <div id="realtimeControls" class="realtime-controls active">
+                <label>Max Počet bodov:
+                    <input type="number" id="maxPoints" min="1">
+                </label>
+                <div class="info-text">Zobrazuje posledných X meraní v reálnom čase</div>
+            </div>
+
+            <div id="filterControls" class="filter-controls">
+                <div class="date-inputs">
+                    <label>Od: <input type="datetime-local" id="dateFrom"></label>
+                    <label>Do: <input type="datetime-local" id="dateTo"></label>
+                    <button id="applyFilterBtn" class="success">Aplikovať filter</button>
+                </div>
+                <div class="date-inputs filter-limit-row">
+                    <label>Max vykreslených bodov:
+                        <input type="number" id="filterRenderLimit" min="1">
+                    </label>
+                </div>
+                <div class="sample-buttons">
+                    <button class="sample-btn" id="quickDayBtn">Posledných 24 hodín</button>
+                    <button class="sample-btn" id="quickWeekBtn">Posledný týždeň</button>
+                    <button class="sample-btn" id="quickMonthBtn">Posledný mesiac</button>
+                </div>
+                <div class="info-text">Zobrazí VŠETKY merania vo vybranom časovom rozsahu (váš lokálny čas)</div>
+                <div class="utc-note">Dáta sú uložené v UTC, filter automaticky konvertuje váš lokálny čas</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="pauseBtn">⏸️ Pozastaviť</button>
+            <button id="exportBtn" class="success">📥 Export CSV</button>
+            <button id="clearBtn" class="danger">🗑️ Vymazať dáta</button>
+            <button id="refreshBtn">🔄 Obnoviť graf</button>
+        </div>
+
+        <div id="status" class="status realtime-active">
+            <strong>⌚ Realtime mód:</strong> Zobrazuje sa posledných 100 bodov
+        </div>
+
+        <div id="lastUpdate" class="last-update"></div>
+
+        <canvas id="chart" width="800" height="400"></canvas>
+    </div>
+
+    <div id="settingsTab" class="tab-content">
+        <h2>Nastavenia ESP32 senzora</h2>
+
+        <div id="settingsStatus" class="status"></div>
+
+        <div class="settings-panel">
+            <div class="setting-group">
+                <label>Gain:</label>
+                <select id="gain">
+                    <option value="1">1x (predvolená hodnota)</option>
+                    <option value="2">2x (najvyššia citlivosť)</option>
+                    <option value="0.125">1/8x (najnižšia citlivosť)</option>
+                    <option value="0.25">1/4x</option>
+                </select>
+                <div class="help-text">Zosilnenie senzora - ovplyvňuje citlivosť</div>
+                <div class="note">1 = najvyššia citlivosť, 1/8 = najnižšia citlivosť</div>
+            </div>
+
+            <div class="setting-group">
+                <label>Integration Time (ms):</label>
+                <select id="it_ms">
+                    <option value="25">25 ms (najrýchlejšie)</option>
+                    <option value="50">50 ms</option>
+                    <option value="100">100 ms (predvolená hodnota)</option>
+                    <option value="200">200 ms</option>
+                    <option value="400">400 ms</option>
+                    <option value="800">800 ms (najpresnejšie)</option>
+                </select>
+                <div class="help-text">Integračný čas - dlhší čas = vyššia presnosť, ale pomalšie meranie</div>
+                <div class="note">25 ms = rýchle meranie, 800 ms = najpresnejšie meranie</div>
+            </div>
+
+            <div class="setting-group">
+                <label>Interval (s):</label>
+                <input type="number" id="interval" step="0.25" min="0.25" max="60" value="1">
+                <div class="help-text">Interval medzi meraniami v sekundách (0.25-60 s, krok 0.25 s)</div>
+                <div class="note">Hodnoty: 0.25, 0.5, 0.75, 1.0, 1.25, ... sekúnd</div>
+            </div>
+
+            <div class="setting-group">
+                <label>Samples:</label>
+                <input type="number" id="samples" step="1" min="1" max="10" value="3">
+                <div class="help-text">Počet vzoriek pre priemerovanie (1-10)</div>
+                <div class="note">Vyšší počet vzoriek = stabilnejšie hodnoty, ale pomalšia odozva</div>
+            </div>
+
+            <div class="settings-actions">
+                <button id="loadSettingsBtn" class="success">📥 Načítať nastavenia</button>
+                <button id="saveSettingsBtn" class="warning">💾 Uložiť nastavenia</button>
+            </div>
+        </div>
+
+        <div class="info-text settings-tip">
+            Po kliknutí na „Načítať nastavenia“ sa odošle požiadavka na ESP32. Ten by mal odpovedať s aktuálnymi nastaveniami, ktoré sa zobrazia vo formulári. Po úprave kliknite na „Uložiť nastavenia“ pre odoslanie nových hodnôt do ESP32.
+            <br><br>
+            Pre prostredie s nízkou úrovňou osvetlenia sa odporúča nastaviť vyšší gain a dlhší integračný čas. Naopak, pre jasné prostredie nižší gain a kratší integračný čas.
+            <br><br>
+            <strong>Gain možnosti:</strong> 1x, 2x, 1/8x, 1/4x<br>
+            <strong>Integration time možnosti:</strong> 25, 50, 100, 200, 400, 800 ms
+        </div>
+    </div>
+
+    <div id="alertsTab" class="tab-content">
+        <h2>E-mailové upozornenia</h2>
+
+        <div id="alertsStatus" class="status"></div>
+
+        <div class="settings-panel">
+            <div class="setting-group">
+                <label for="alertEnabled">Aktivovať upozornenie:</label>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="alertEnabled">
+                    <span class="help-text">Po aktivovaní sa bude sledovať nastavený limit lux.</span>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <label for="alertEmail">E-mailová adresa:</label>
+                <input type="email" id="alertEmail" placeholder="napr. meno@example.com">
+                <div class="help-text">Na túto adresu bude odoslané upozornenie pri splnení podmienky.</div>
+            </div>
+
+            <div class="setting-group">
+                <label for="alertThreshold">Hraničná hodnota (lx):</label>
+                <input type="number" id="alertThreshold" step="0.1" min="0" placeholder="napr. 100">
+                <div class="help-text">Zadajte hodnotu intenzity osvetlenia, ktorú chcete sledovať.</div>
+            </div>
+
+            <div class="setting-group">
+                <label for="alertDirection">Režim upozornenia:</label>
+                <select id="alertDirection">
+                    <option value="above">Nad zadanú hodnotu</option>
+                    <option value="below">Pod zadanú hodnotu</option>
+                </select>
+                <div class="help-text">Zvoľte, či sa má upozornenie odoslať pri prekročení alebo poklese pod zadaný limit.</div>
+            </div>
+
+            <div class="settings-actions">
+                <button id="loadAlertBtn" class="success">📥 Načítať upozornenie</button>
+                <button id="saveAlertBtn" class="warning">💾 Uložiť upozornenie</button>
+                <button id="testAlertBtn">✉️ Odoslať testovací e-mail</button>
+            </div>
+        </div>
+
+        <div class="info-text settings-tip">
+            V tejto časti je možné nastaviť e-mailové upozornenie na prekročenie alebo pokles pod zvolenú hodnotu intenzity osvetlenia.
+            <br><br>
+            <strong>Príklad:</strong> Ak nastavíte limit 100 lx a režim „Nad zadanú hodnotu“, systém odošle e-mail v momente, keď nameraná hodnota prekročí 100 lx.
+            <br><br>
+            Upozornenie sa odosiela iba pri zmene stavu, aby sa zabránilo opakovanému spamovaniu pri každom ďalšom meraní.
+        </div>
+    </div>
+</div>
+
+<script>
+    window.APP_CONFIG = {{ app_config | tojson }};
+</script>
+<script src="{{ url_for('app_js') }}"></script>
+</body>
+</html>
