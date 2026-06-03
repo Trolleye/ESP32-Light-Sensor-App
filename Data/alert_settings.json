@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "email": "",
+  "threshold": 100.0,
+  "direction": "above"
+}
